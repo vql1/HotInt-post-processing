@@ -1,0 +1,712 @@
+%======================================================================
+% HOTINT model: clamped-clamped beam, center load 
+% $Id: clamped-beam-C2-2DGE.hid,v 1.3 2018/03/21 13:58:38 vql Exp vql $
+% created on: 2017.12.02
+%
+% GOAL: static analysis of buckled beam, and dynamic snap through 
+% Effects of excitation frequency and force amplitude on snap through
+%
+% hid file: clamped-beam-C2-2DGE.hid
+% prescribed constant axial DISPLACEMENT (coordinate offset)
+%
+% this "2DGE" (i.e., 2D GEOmetrically-EXact beam) hid file is similar 
+% to the ANCF hid file clamped-beam-C1-2d4-b4-f2.hid,
+% which is itself a cleaned-up version of clamped-beam-C1-2d4-b4-f1.hid.
+%
+% CoordinateConstraint
+% Lagrange multipliers for all other dofs
+% penalty formulation is NOT used (commented out) in this hid file.
+%
+% STATIC analysis to get buckled config: 
+% Use Lagrange multiplier to impose, at the far clamped end, the same axial displacement 
+% for the buckled config obtained by imposing axial force, which is not used here.
+% No axial force is used in static analysis in this hid file.  For the application of 
+% axial force to obtain the buckled configuration, see  the file clamped-beam-C2-2DGE.hid.
+%
+% DYNAMIC analysis of snap through
+% mass density rho = 1000
+% damping coefficient = 0
+%
+% midspan load = - TransverseForceAmplitude * sin(pi * t / half_period)
+%=====================================================================
+
+% version with 2D geometrically-exact beam
+HOTINT_data_file_version = "1.3.18"
+
+% static analysis
+% do_static_analysis = 1
+%
+% define coord_offset as global variable for later use in containers "ClampedEnd_2" and "lin"
+coord_offset = -0.75844661510
+
+% dynamic analysis
+do_static_analysis = 0
+
+% stop computation with stopping criterion
+stop_computation_early = 1
+% NO stopping computation
+% stop_computation_early = 0
+
+% fundamental vibration period of buckled beam
+fundamental_period_1 = 4.9436258569 
+% excitation period 1
+excitation_period_1 = 90 * fundamental_period_1
+
+% case np1=90, fa=360
+simulated_time = 780
+%
+% 2.69 cycles of period 428.43 each
+simulated_time = 1152
+%
+% 5.2 cycles of period 428.43 each
+simulated_time = 2228
+%
+% 10.2 cycles of period 444.93 each
+% simulated_time = 4540
+%
+% 20 cycles of period 444.90 each = 8898, use 10000, or 10000 / 444.90 = 22.48 cycles
+% simulated_time = 10000
+%
+% 25 cycles of period 444.90 each = 8898, use 10000, or 10000 / 444.90 = 22.48 cycles
+simulated_time = 25 * excitation_period_1
+%
+% 40 cycles of period 444.90 each = 17796, use 20000, or 20000 / 444.90 =44.95 cycles
+% simulated_time = 20000
+if(do_static_analysis == 1)
+{
+	simulated_time = 70
+}
+
+% beam dimensions
+length = 10.
+height = 0.1
+width  = 1
+Area = height * width
+% moment of inertia wrt Y axis
+I_y = width * height^3 / 12
+% moment of inertia wrt Z axis
+I_z = width^3 * height / 12
+
+% number of beam elements
+nr_of_elements = 80 % 20 * 4
+% half element length for use in local position of force and sensor
+half_elem_length = 0.5 * length / nr_of_elements
+
+% material properties
+Young_modulus = 1e7
+rho = 1000
+
+Poisson_ratio = 0.4
+% shear correction factor
+k_shear = 10 * (1 + Poisson_ratio) / (12 + 11 * Poisson_ratio)
+
+% shear modulus
+shear_modulus = Young_modulus / (2 * (1 + Poisson_ratio))
+
+% NOT USED
+% penalty stiffness
+% penalty_stiffness = 1e8
+
+% NOT USED
+% applied tip load amplitude
+% unit_force = 1
+
+% NOT USED
+% transverse perturbation force
+% perturbation = 1
+
+% damping coefficient
+damping_coefficient = 0
+
+% bp = beam properties
+bp
+{
+	% Hotint doc, p.292, sec 3.6.1, Beam3DProperties
+	material_type = "Beam2DProperties"
+	solid.density = rho
+	damping.C_M = damping_coefficient
+	cross_section_size = [height,width]
+	EA = Young_modulus * Area
+	%
+	% this 2D GEO-EX element only needs one bending stiffness EI, and EIy was selected 
+	% to represent this bending stiffness, even though EIz would be more logical since
+	% the beam deforms in the plane XY, and thus the cross section rotates about the Z axis.
+	%
+	% the reason was because in the code for "Beam2DProperties", EIy (and not EIz) was selected 
+	% to represent EI for 2D beam.
+	%
+	% here, in this particular example of buckled beam,  
+	% another reason for using I_y in the bending stiffness EIy = E * I_y was because in 
+	% the hid file for ANCF 3D beam, the y axis is the axis of rotation for the cross-section, 
+	% and the beam deforms in the plane XZ.
+	EIy = Young_modulus * I_y
+	% EIz = Young_modulus * I_z
+	%
+	GAky = k_shear * shear_modulus * Area
+	% GAkz = GAky
+	GJkx = shear_modulus * (I_y + I_z)
+	RhoA = rho * Area
+	RhoIy = rho * I_y
+	% RhoIz = rho * I_z
+}
+% Hotint doc, p.347, sec 3.13.8, AddBeamProperties
+edc_BeamProperties = AddBeamProperties(bp)
+
+% generate beam mesh with explicit code, instead of ready-made command GenerateBeam, 
+% which has not been extended to the new 2D geometrically-exact beam.
+%
+% initialize the node position array "pos" to the origin of the coordinate system
+pos = [0., 0., 0.]
+% element size
+h = length / nr_of_elements
+% increment array with increment "h" along X axis
+incr = [h, 0, 0]
+
+node
+{
+	% new node type for 2D geometrically-exact beam
+	node_type = "Node2DR3"
+}
+
+for(i=0, i <= nr_of_elements, i=i+1)
+{
+	node.Geometry.reference_position = pos
+	AddNode(node) 
+	pos = pos + incr
+}
+
+beam_elem
+{
+	% new element type for 2D geometrically-exact beam
+	element_type = "BeamShear2D"
+	Physics.material_number = 1
+}
+
+for(i=1, i <= nr_of_elements, i=i+1)
+{
+	beam_elem.Geometry.node_numbers = [i, i+1]
+	AddElement(beam_elem)
+}
+
+% first element index (number) for clamped end on local node 1
+idx_elem_first = 1
+% last element index (number) for applied load on local node 2
+idx_elem_last = nr_of_elements
+
+% clamped end in 1st elem
+% for 2D GEO-EX beam, there are 3 dofs per node (2 disp, 1 rot)
+% there are nine dofs (local coordinates) per node: 
+% clamped boundary conditions: fix all 3 dofs using Lagrange multipliers
+ClampedEnd_1
+{
+	% Hotint doc, p.164, sec 3.3.2, CoordinateConstraint
+	element_type = "CoordinateConstraint"
+	name = "cc_ux"
+	
+	% Hotint doc, p.166, sec 3.3.2, Physics subcontainer
+	Physics
+	{	
+		% lagrange multiplier
+		use_penalty_formulation = 0
+		%
+		% NOT USED
+		% penalty function
+		% use_penalty_formulation = 1
+		Penalty
+		{
+			% spring_stiffness = penalty_stiffness
+		}
+	}
+	
+	% Hotint doc, p.166, sec 3.3.2, Coordinate1 subcontainer
+	Coordinate1
+	{
+		element_number = idx_elem_first
+		%
+		% the four nodal disps are numbered 1 to 4; 
+		% at local node 1, the axial disp is dof no.1, the transverse disp is dof no.2.
+		% at local node 2, the axial disp is dof no.3, the transverse disp is dof no.4.
+		% the two nodal rots are numbered 5 and 6; 
+		% at local node 1, the rot is dof no.5.
+		% at local node 2, the rot is dof no.6.
+		%
+		% at local node 2, the axial disp is dof no.3.
+		local_coordinate = 1
+	}
+}
+% Hotint doc, p.344, sec 3.13.4, AddConnector
+AddConnector(ClampedEnd_1)
+
+ClampedEnd_1.name = "cc_uy"
+%
+% at local node 1, the transverse disp is dof no.2.
+ClampedEnd_1.Coordinate1.local_coordinate = 2
+AddConnector(ClampedEnd_1)
+
+ClampedEnd_1.name = "cc_rot"
+%
+% at local node 1, the rot is dof no.5.
+ClampedEnd_1.Coordinate1.local_coordinate = 5
+AddConnector(ClampedEnd_1)
+
+
+% clamped end in last elem
+% for 2D GEO-EX beam, there are 3 dofs per node (2 disp, 1 rot)
+% there are nine dofs (local coordinates) per node: 
+% clamped boundary conditions: fix all 3 dofs using Lagrange multipliers
+% for 
+%
+% NOT USED
+% penalty_factor = 1
+%
+ClampedEnd_2
+{
+	% Hotint doc, p.164, sec 3.3.2, CoordinateConstraint
+	element_type = "CoordinateConstraint"
+	name = "cc_ux 2nd node of last elem"
+
+	% even though the coordinate offset was set to full value, it is subsequently modified to increment
+	% linearly toward the final value, using the container "lin" (for "linear") below.
+	%
+	% the modification of the coordinate offset using the container "edm" (ElementDataModifier) is only 
+	% for static analysis to increment the coord offset gradually so the buckled config is in the same
+	% direction as the transverse force. 
+	%
+	% in dynamic analysis, we still need the coord offset at full value, so the command below is still
+	% necessary.
+	%
+	% commented out since coord_offset had been defined above as global variable
+	% coord_offset = -0.75844661510
+	relative_to_inital_values = 0
+	
+	% Hotint doc, p.166, sec 3.3.2, CoordinateConstraint, Physics subcontainer
+	Physics
+	{	
+		% USE lagrange multiplier
+		use_penalty_formulation = 0
+		% 
+		% NOT USED
+		% penalty function
+		% use_penalty_formulation = 1
+		Penalty
+		{
+			% spring_stiffness = penalty_factor * penalty_stiffness
+		}
+	}
+	
+	% Hotint doc, p.166, sec 3.3.2, Coordinate1 subcontainer
+	Coordinate1
+	{
+		element_number = idx_elem_last
+		%
+		% the four nodal disps are numbered 1 to 4; 
+		% at local node 1, the axial disp is dof no.1, the transverse disp is dof no.2.
+		% at local node 2, the axial disp is dof no.3, the transverse disp is dof no.4.
+		% the two nodal rots are numbered 5 and 6; 
+		% at local node 1, the rot is dof no.5.
+		% at local node 2, the rot is dof no.6.
+		%
+		% at local node 2, the axial disp is dof no.3.
+		local_coordinate = 3
+	}
+}
+% Hotint doc, p.344, sec 3.13.4, AddConnector
+n_cc_right_axial = AddConnector(ClampedEnd_2)
+
+% lagrange multiplier
+ClampedEnd_2.coord_offset = 0
+ClampedEnd_2.Physics.use_penalty_formulation = 0
+ClampedEnd_2.name = "cc_uy 2nd node of last elem"
+%
+% at local node 2, the transverse disp is dof no.4.
+ClampedEnd_2.Coordinate1.local_coordinate = 4
+AddConnector(ClampedEnd_2)
+
+ClampedEnd_2.name = "cc_rot 2nd node of last elem"
+%
+% at local node 2, the rot is dof no.6.
+ClampedEnd_2.Coordinate1.local_coordinate = 6
+AddConnector(ClampedEnd_2)
+
+% Hotint doc, p.260, sec 3.4.12, IOTime
+% Hotint doc, p.252, sec 3.4.8, example
+% get access to the analysis time in the dynamic process being analyzed,
+% used in the "lin" container below to increase the axial disp offset linearly with the analysis time
+time
+{
+	element_type = "IOTime"
+}
+n_time = AddElement(time)
+
+% a linear function in "u" proportional to the coord_offset, divided by simulated_time.
+% both coord_offset and simulated_time are defined as global variables above.
+% this function is used to gradually increase the prescribed axial displacement at the far-clamped end 
+%
+% Hotint doc, p.250, sec 3.4.8, IOMathFunction
+% Hotint doc, p.252, sec 3.4.8, example
+lin
+{
+	element_type = "IOMathFunction"
+	IOBlock
+	{
+		% ALEX, 2018.03.03
+		% n_time is element number for element type  IOTime; see manual, p.251
+		input_element_numbers = [n_time]
+		%
+		% element_types = 1 means an IOElement; 
+		% the input element type is the IOElement "time"
+		input_element_types = [1]
+		%
+		% input_local_number = vector of output numbers of previous IOElement "time" connected
+		% to this IOElement "lin"; there is only one output from "time"
+		input_local_number = [1]
+		
+		MathFunction
+		{
+			parsed_function = "coord_offset * u / simulated_time"
+			parsed_function_parameter = "u"
+		}
+	}
+}
+n_lin = AddElement(lin)
+
+% ALEX
+% what is the ElementDataModifier (edm) used for ?
+% answer:
+% to modify certain desired variables of an element; below the coordinate offset of a
+% connector element is modified.
+edm
+{
+        % Hotint doc, p.267, sec 3.4.16, IOElementDataModifier
+	element_type = "IOElementDataModifier"
+	IOBlock
+	{
+		% ALEX
+		% n_lin is the input element number for the IOelement "lin" ; see manual, p.267 ?
+		input_element_numbers = [n_lin]
+		%
+		% element_types = 1 means an IOElement
+		% here, that's the IOelement "lin"
+		input_element_types = [1]
+		%
+		% input_local_number = vector of output numbers of previous IOElement "lin" connected
+		% to this IOElement "edm"; there is only one output from "lin"
+		input_local_number = [1]
+		%
+                % Hotint doc, p.166, sec 3.3.2, CoordinateConstraint, Connector.CoordinateConstraint.coordinate_offset 
+		%
+		% ALEX
+		% why not use "coord_offset" instead of "coordinate_offset" to be consistent throughout the manual ?
+		% this difference could be a source of confusion.
+		% answer:
+		% that was how the variable was called inside the code.  
+		mod_variable_name = "Connector.CoordinateConstraint.coordinate_offset"
+		%
+		% n_cc_right_axial had been declared above as the connector for the axial displacement at the right (far) clamped end
+		mod_element_number = n_cc_right_axial
+	}
+}
+if(do_static_analysis==1)
+{
+	AddElement(edm)
+}
+
+%======================================================================
+% define and apply transverse force
+%
+TransverseForceAmplitude = 342
+
+% 10 ANCF elements
+% frequency_1 = 0.2100693
+% 80 GEO-EX elements
+frequency_1 = 0.20228068
+
+% even when n_period_1 is a parameter to vary, we still need to initialize it here.
+n_period_1 = 80
+
+half_period = n_period_1 / frequency_1 / 2 
+TransverseForce
+%
+% for dynamic analysis, the transverse force is a sine function
+{
+	% Hotint doc, p.304, sec 3.8.4, ForceVector3D
+	load_type = "ForceVector2D" 
+	force_vector = [0, 1]
+	position = [1, 0]
+	load_function_type = 1
+	MathFunction
+	{
+		parsed_function = "- TransverseForceAmplitude * sin(pi * t / half_period)"
+		parsed_function_parameter = "t"
+	}
+}
+%
+% for static analysis to get the buckled configuration, use the hat function
+% for the perturbation transverse load, which starts at (0,0), then jump up to 
+% 70 at time t = 1, and comes down to zero at time t = 70.
+if(do_static_analysis==1)
+{
+	TransverseForce.MathFunction.parsed_function = "(70-t)"
+}
+edc_TransverseForce = AddLoad(TransverseForce)
+
+idx_mid_elem = idx_elem_last / 2
+% Hotint doc, p.320, sec 3.11, Set
+SetLoad_perturbation
+{
+	% Hotint doc, p.320, sec 3.11.1, ElementSet
+  	set_name = "ElementSetLoad perturbation"
+  	set_type = "ElementSet"
+  	element_numbers = [idx_mid_elem] % element no. at midspan; worked
+}
+% Hotint doc, p.383, sec 3.13.48, AddSet
+nSetLoad_perturbation = AddSet(SetLoad_perturbation)
+
+% Hotint doc, p.389, sec 3.13.52, AssignLoad
+AssignLoad(nSetLoad_perturbation, edc_TransverseForce)	% assign perturbation load at midspan
+
+%======================================================================
+% parameters for showing applied force arrows and the arrow size
+%
+% Hotint doc, p.406, sec 3.14.4, ViewingOptions
+ViewingOptions.Loads.show_loads = 1
+% ViewingOptions.Connectors.global_draw_scalar_size = 0.30
+ViewingOptions.Connectors.Autosize = 1
+ 
+%======================================================================
+% sensor outputs
+beamSensors
+{
+	% Hotint doc, p.309, sec 3.9.1, FVElementSensor
+	sensor_type = "FVElementSensor"
+	name = "y-displacement_midspan"
+	element_number = idx_mid_elem
+	local_position = [1, 0, 0]
+	field_variable = "displacement"
+	component = "y"
+}
+% Hotint doc, p.346, sec 3.13.6, AddSensor
+n_sens_mid = AddSensor(beamSensors)
+
+% x coordinate of midspan
+beamSensors.name = "x-displacement_midspan"
+beamSensors.element_number = idx_mid_elem
+beamSensors.component = "x"
+AddSensor(beamSensors)
+
+% x coordinate of beam right end (where penalty function is applied)
+beamSensors.name = "x-displacement_right"
+beamSensors.element_number = idx_elem_last
+beamSensors.component = "x"
+AddSensor(beamSensors)
+
+% Hotint doc, p.311, sec 3.9.3, LoadSensor
+LoadSensor
+{
+	name = "Transverse_load_sensor"
+	sensor_type = "LoadSensor"
+	load_number = edc_TransverseForce
+}
+AddSensor(LoadSensor)
+
+% ALEX
+% the graphics did not show the sensor IOblocks
+IOthreshold
+{
+	element_type = "IOMathFunction"
+	IOBlock
+	{
+		input_element_numbers = [n_sens_mid]
+		input_element_types = [2]
+		input_local_number = [1]
+		MathFunction
+		{
+			% ALEX
+			% which test is more general for HotInt, without hard coding the test for just the buckled beam ?
+			%
+			% "abs(u) < 0.1" : when midspan position is within a band of half-width 0.1 about the X axis
+			%
+			% "1.7 - abs(u) > 0.2" : when the difference between the initial midspan position 1.7 and the absolute value of 
+			%    the midspan position is less than 0.2; but this stopping critirion may make the computation stop too early.
+			%
+			% "u < 0 && abs(-1.7 + abs(u)) < 0.1 * 1.7" : consider to stop the computation only when the midspan position 
+			%    is negative, AND when the midspan position is within 10% of the negative opposite of the initial midspan position.
+			%
+			parsed_function = "u < 0 && abs(-1.7 + abs(u)) < 0.1 * 1.7" 
+			parsed_function_parameter = "u"
+		}
+	}
+}
+nIOthreshold = AddElement(IOthreshold)
+
+% ALEX
+% what does "sensIOnorm" do ?
+% sensor to output the IOthreshold function, only for debugging reason (YES)
+sensIOnorm 
+{
+	name = "threshold"
+	sensor_type= "ElementSensor"
+	element_number= nIOthreshold
+	value= "IOBlock.output[1]"
+}
+AddSensor(sensIOnorm)
+
+% DYNAMIC analysis, criterion to stop computation early
+if(do_static_analysis==0 && stop_computation_early==1)
+{
+	IOstop 
+	{
+		element_type = "IOStopComputation"
+		IOBlock
+		{
+			input_element_numbers = [nIOthreshold]
+			input_element_types = [1]
+			input_local_number = [1]
+		}
+	}
+	nIOstop = AddElement(IOstop)
+}
+
+%======================================================================
+% solver options
+
+% Hotint doc, p.393, sec 3.14.1, SolverOptions
+SolverOptions.start_time = 0
+% for SolverOptions.end_time, see below
+
+% dynamic options
+SolverOptions.do_static_computation = do_static_analysis
+%
+SolverOptions.Timeint.max_step_size = 2e-1
+SolverOptions.Timeint.min_step_size = 1e-5 % 1e-3 % 2e-2
+
+% decide whether to use constant time step size, or automatic time step size control
+if(stop_computation_early == 1)
+{
+	% case of stopping computation early to detect only the 1st snap-through
+	% use constant time step size
+	SolverOptions.Timeint.automatic_stepsize_control = 0
+}
+%
+if(stop_computation_early == 0)
+{
+	% case of NO stopping computation early
+	% use automatic time step size control
+	SolverOptions.Timeint.automatic_stepsize_control = 1
+}
+
+% default, LobattoIIIA = implicit trapezoidal
+SolverOptions.Timeint.tableau_name = "LobattoIIIA"
+% SolverOptions.Timeint.tableau_name = "RadauIIA"
+%
+% to keep the mass matrix constant at each integration step
+% SolverOptions.Timeint.assume_constant_mass_matrix = 0
+SolverOptions.Timeint.assume_constant_mass_matrix = 1
+
+% Hotint doc, p.394, sec 3.14.1, SolverOptions
+% static options
+% SolverOptions.do_static_computation = 1
+% SolverOptions.Static.max_load_inc = 0.05
+% SolverOptions.Static.max_load_inc = 0.1
+% SolverOptions.Static.max_load_inc = 1
+
+% use modified newton
+SolverOptions.Newton.use_modified_newton = 1
+% use full newton
+% SolverOptions.Newton.use_modified_newton = 0
+
+% Hotint doc, p.382, sec 3.13.46, StrCat
+% output filename with damping coefficients
+% output filename with n_period_1
+fname1 = StrCat("output-np1=", n_period_1)
+%
+fname2 = StrCat(fname1, "-fa=")
+%
+% numbers in filenames are limited to no more than 3 decimal digits,
+% e.g., 354.8934 would show up as 354.893 in the filename, and thus
+% the outputs for fa=354.3834 and fa=354.8936 would be together in the same output file 
+% with number fa=354.893, and when plotted, there would be a diagonal straight line
+% due to the plot pen returning to the origin of the coordinate system
+% fname3 = StrCat(fname2, TransverseForceAmplitude)
+%
+% quick and dirty work-around method just to get the last significant decimal digits 
+% in the filename
+%
+TFA = TransverseForceAmplitude
+% cases with 4 or 5 decimal digits
+% TFA = (TransverseForceAmplitude - 352.8720) * 100000
+fname3 = StrCat(fname2, TFA)
+%
+fname4 = StrCat(fname3, "-sensor-outputs")
+%
+% Hotint doc, p.396, sec 3.14.1, SolverOptions
+SolverOptions.Solution.SolutionFile.output_filename = StrCat(fname4, ".txt")
+
+% simulated_time was defined above, and is different for static and for dynamic analyses
+SolverOptions.end_time = simulated_time
+
+SolverOptions.Newton.relative_accuracy = 1e-7
+
+% STATIC analysis, NO parameter variation
+if(do_static_analysis==1)
+{
+	SolverOptions.ParameterVariation.activate = 0
+}
+
+% DYNAMIC analysis, activate parameter variation
+if(do_static_analysis==0)
+{
+	SolverOptions.ParameterVariation.activate = 1
+}
+
+SolverOptions.ParameterVariation.start_value = 10
+SolverOptions.ParameterVariation.end_value = 19
+SolverOptions.ParameterVariation.arithmetic_step = +1
+SolverOptions.ParameterVariation.MBS_EDC_variable_name = "n_period_1"
+%
+% parameter 2, vary force amplitude
+
+SolverOptions.ParameterVariation.Var2.activate = 1 
+%
+% number of decimal digits varies
+SolverOptions.ParameterVariation.Var2.start_value = 581
+SolverOptions.ParameterVariation.Var2.end_value = 600
+SolverOptions.ParameterVariation.Var2.arithmetic_step = +1
+%
+SolverOptions.ParameterVariation.Var2.MBS_EDC_variable_name = "TransverseForceAmplitude"
+SolverOptions.Solution.ParameterFile.write_final_sensor_values = 0
+SolverOptions.Solution.ParameterFile.write_cost_function = 0
+
+% data manager, save results at interval of n steps
+% n = 0, no saving
+ViewingOptions.DataManager.store_data_every = 0
+% n = 5, save at every 5 steps
+% ViewingOptions.DataManager.store_data_every = 5
+% n = 10, save at every 10 steps
+% ViewingOptions.DataManager.store_data_every = 10
+
+% set the directory path for saving output files
+% GeneralOptions.Paths.sensor_output_path = "C:\Users\humer\Documents\loc\output\"
+% GeneralOptions.Paths.sensor_output_path = "C:\Users\thn\Documents\HOTINT simulations\clamped-clamped beam GEO-EX\"
+GeneralOptions.Paths.sensor_output_path = "C:\Users\thn\Documents\HOTINT simulations\clamped-clamped beam GEO-EX\np1=10-19\"
+
+%
+% STATIC analysis, save buckled config for use later as initial config in dynamic analysis
+if(do_static_analysis==1)
+{
+	SolverOptions.Solution.store_solution_state = 1
+	SolverOptions.Solution.store_solution_state_name = "buckled_config.sol"
+	SolverOptions.Solution.load_solution_state = 0
+}
+
+%
+% DYNAMIC analysis, load buckled config as initial config
+if(do_static_analysis==0)
+{
+	SolverOptions.Solution.store_solution_state = 0
+	SolverOptions.Solution.load_solution_state = 1
+	SolverOptions.Solution.load_solution_state_name = "buckled_config.sol"
+}
+
+
+
